@@ -6,6 +6,7 @@ import cw1.DTO.*; // your request DTOs (DistanceRequest, NextPositionRequest, Re
 import cw1.service.CalculationService;
 import cw1.service.DroneService;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +22,7 @@ public class ServiceController {
     private final CalculationService calculationService;
     private final DroneService droneService;
 
+    @Autowired
     public ServiceController(CalculationService calculationService,
                              DroneService droneService) {
         this.calculationService = calculationService;
@@ -65,19 +67,30 @@ public class ServiceController {
 
 
     @GetMapping("/dronesWithCooling/{state}")
-    public List<Integer> hasCooling(@PathVariable boolean state) {
+    public List<String> hasCooling(@PathVariable boolean state) {
         return droneService.hasCooling(state);
     }
 
 
     @GetMapping("/droneDetails/{id}")
-    public Drone getDetails(@PathVariable Integer id) {
+    public Drone getDetails(@PathVariable String id) {
         return droneService.getDetails(id);
     }
 
     @GetMapping("/queryAsPath/{attributeName}/{attributeValue}")
-        public List<Integer> getQuery(@PathVariable String attributeName, @PathVariable String attributeValue) {
+        public List<String> getQuery(@PathVariable String attributeName, @PathVariable String attributeValue) {
         return droneService.getQuery(attributeName, attributeValue);
     }
 
+    @PostMapping("/query")
+    public List<String> query(@Valid @RequestBody List<QueryAttribute> queryAttributes) {
+        return droneService.query(queryAttributes);
+    }
+
+    @PostMapping("/queryAvailableDrones")
+    public List<String> queryAvailableDrones(@Valid @RequestBody List<MedDispatchRec> medDispatchRecReq) {
+        return droneService.queryAvailableDrones(medDispatchRecReq);
+    }
+
 }
+
