@@ -13,7 +13,7 @@
     </parent>
 
     <groupId>org.example</groupId>
-    <artifactId>cw1</artifactId>
+    <artifactId>Cw1</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
