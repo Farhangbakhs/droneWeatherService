@@ -1,5 +1,6 @@
 package cw1.controller;
 
+import cw1.service.DroneService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -23,6 +24,9 @@ class ServiceControllerMvcTests {
 
     @MockitoBean
     CalculationService calculationService;
+
+    @MockitoBean
+    DroneService droneService;
 
     @Test
     void uid_returnsStudentId() throws Exception {
