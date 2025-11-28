@@ -1,4 +1,3 @@
-
 package cw1.service;
 
 import cw1.DTO.DispatchRec;
@@ -6,23 +5,27 @@ import cw1.DTO.External.Drone;
 
 import cw1.DTO.External.DronesForService;
 import cw1.DTO.External.ServicePoint;
-import cw1.DTO.Internal.CapabilityDTO;
-import cw1.DTO.Internal.LocationDTO;
-import cw1.DTO.LngLat;
+import cw1.DTO.Internal.*;
+        import cw1.DTO.LngLat;
 import cw1.DTO.MedDispatchRec;
 import cw1.DTO.QueryAttribute;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import java.math.*;
+        import cw1.DTO.Internal.GeoJsonLineString;
+import cw1.DTO.Internal.DronePathDTO;
+import cw1.DTO.Internal.DeliveryPathDTO;
+import java.util.PriorityQueue;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.HashSet;
 
 import java.time.DayOfWeek;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
-import static java.util.stream.Collectors.toList;
+        import static java.util.stream.Collectors.toList;
 
 @Service
 public class DroneService {
@@ -35,6 +38,35 @@ public class DroneService {
         this.calculationService = calculationService;
     }
 
+    private static final double[] ALLOWED_ANGLES = {
+            0, 22.5, 45, 67.5, 90, 112.5, 135, 157.5,
+            180, 202.5, 225, 247.5, 270, 292.5, 315, 337.5
+    };
+
+    private record DroneAssignment(Drone drone, ServicePoint servicePoint) {}
+
+    //Each node represents
+        //  one grid point(LngLat)
+        //How far we have traveled
+        //f = g + h , h = straight line distance to target
+        //Parent [Where we came from, so we can reconstruct the path backwards later]
+
+    private static class Node {
+        final LngLat point;
+        double g;      // cost from start
+        double f;      // g + heuristic
+        Node parent;
+
+        Node(LngLat point, double g, double f, Node parent) {
+            this.point = point;
+            this.g = g;
+            this.f = f;
+            this.parent = parent;
+        }
+    }
+
+
+    // 1) /dronesWithCooling → hasCooling
 
 
     public List<String> hasCooling(boolean state) {
@@ -47,6 +79,10 @@ public class DroneService {
                 .collect(toList());
     }
 
+
+    // 2) /droneDetails/{id} → getDetails
+
+
     public Drone getDetails(String id) {
         return retrieveService.getAllDrones().stream()
                 .filter(d -> id.equals(d.getId()))
@@ -55,9 +91,12 @@ public class DroneService {
                         new ResponseStatusException(HttpStatus.NOT_FOUND, "Drone not found: " + id));
     }
 
-    //create whitelist for validating against attribute name
-    private static final Set<String> ALLOWED_ATTRIBUTES = Set.of("cooling", "heating", "capacity", "maxMoves", "costPerMove", "costInitial", "costFinal");
 
+    // 3) /queryAsPath/{attributeName}/{attributeValue} → getQuery
+
+
+    //create whitelist for validating against attribute name
+    private static final Set<String> ALLOWED_ATTRIBUTES = Set.of("name", "id","cooling", "heating", "capacity", "maxMoves", "costPerMove", "costInitial", "costFinal");
 
     public List<String> getQuery(String attributeName, String attributeValue) {
         if (!ALLOWED_ATTRIBUTES.contains(attributeName)) //Validating name is withing the allowed whitelist attributes
@@ -68,6 +107,12 @@ public class DroneService {
         return drones.stream()
                 .filter(drone -> {
                             switch (attributeName) {
+                                case "name" -> {
+                                    return Objects.equals(drone.getName(), attributeValue);
+                                }
+                                case "id" -> {
+                                    return Objects.equals(drone.getId(), attributeValue);
+                                }
                                 case "cooling" -> {
                                     return drone.getCapability().getCooling() == Boolean.parseBoolean(attributeValue);
                                 }
@@ -75,241 +120,34 @@ public class DroneService {
                                     return drone.getCapability().getHeating() == Boolean.parseBoolean(attributeValue);
                                 }
                                 case "capacity" -> {
-                                    return drone.getCapability().getCapacity() == Integer.parseInt(attributeValue);
+                                    return Math.abs(drone.getCapability().getCapacity() - Double.parseDouble(attributeValue)) <0.0001;
                                 }
                                 case "maxMoves" -> {
                                     return drone.getCapability().getMaxMoves() == Integer.parseInt(attributeValue);
                                 }
                                 case "costPerMove" -> {
-                                    return drone.getCapability().getCostPerMove() == Double.parseDouble(attributeValue);
+                                    return Math.abs(drone.getCapability().getCostPerMove() - Double.parseDouble(attributeValue)) < 0.0001;
                                 }
                                 case "costInitial" -> {
-                                    return drone.getCapability().getCostInitial() == Double.parseDouble(attributeValue);
+                                    return Math.abs(drone.getCapability().getCostInitial() - Double.parseDouble(attributeValue)) < 0.0001;
                                 }
                                 case "costFinal" -> {
-                                    return drone.getCapability().getCostFinal() == Double.parseDouble(attributeValue);
+                                    return Math.abs(drone.getCapability().getCostFinal() - Double.parseDouble(attributeValue)) <0.0001;
                                 }
 
                                 default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Value not allowed");
 
                             }
-                            }
-                        )
+                        }
+                )
                 //map results to corresponding drone IDs
                 .map(Drone::getId)
                 //collect them into a list
                 .toList();
-
-
-    }
-
-    //Method to return list of drone ids that can satisy medDispatchRec
-    public List<String> queryAvailableDrones(List<MedDispatchRec> medDispatchRecs){
-        //Handles special case if medDispatch is empty
-        if (medDispatchRecs == null || medDispatchRecs.isEmpty()) {
-            return retrieveService.getAllDrones().stream()
-                    .map(Drone::getId)
-                    .filter(Objects::nonNull)
-                    .collect((toList()));
-        }
-
-        //fetching data from external rest service on every call
-        List<Drone> drones  = retrieveService.getAllDrones();
-        List<DronesForService> dronesForServices = retrieveService.getAllDronesForService();
-        List<ServicePoint> servicePoints = retrieveService.getAllServicePoints();
-
-
-        //filters drones and keeps only those that can handle all dispatches
-        return drones.stream()
-                .filter(drone -> singleDroneFilter(drone, medDispatchRecs, dronesForServices, servicePoints))
-                .map(Drone::getId)
-                .filter(Objects::nonNull)
-                .collect(toList());
     }
 
 
-    //Checks whether one specific drone can handle all the necessary requirements uses && logic
-    private boolean singleDroneFilter(Drone drone,List<MedDispatchRec> medDispatchRecs , List<DronesForService> dronesForServices, List<ServicePoint> servicePoints ) {
-
-        //sums capacity of all dispatch requirementts and checks if drone can handle the entire capacity
-        int checkTotalCapacity = medDispatchRecs.stream()
-                .map(MedDispatchRec::getRequirements)
-                .map(DispatchRec::getCapacity)
-                .filter(Objects::nonNull)
-                .mapToInt(Integer::intValue)
-                .sum();
-        if(drone.getCapability().getCapacity() < checkTotalCapacity) {
-            return false;
-        }
-
-        //for every dispatch if cooling is required , drone must have cooling
-        boolean coolingOk = medDispatchRecs.stream()
-                .allMatch(medDispatchRec -> {
-                    DispatchRec rec = medDispatchRec.getRequirements();
-                    Boolean coolingRequired = rec.getCooling();
-                    //null or false then no requirement, if true then drone must have cooling
-                    return coolingRequired == null || !coolingRequired || Boolean.TRUE.equals(drone.getCapability().getCooling());
-                });
-
-        if(!coolingOk) {
-            return false; //fails cooling requirement for atleast one dispatch
-        }
-
-        //for every dispatch if heating is required , drone must have heating
-        boolean heatingOK = medDispatchRecs.stream()
-                .allMatch((medDispatchRec -> {
-                    DispatchRec rec = medDispatchRec.getRequirements();
-                    Boolean heatingRequired = rec.getHeating();
-                    //null or false then no requirement, if true then drone must have heating
-                    return heatingRequired == null || !heatingRequired || Boolean.TRUE.equals(drone.getCapability().getHeating());
-                }));
-
-        if(!heatingOK) {
-            return false; // fails heating requirement for atleast one dispatch
-        }
-
-        //drone must be available for every dispatchs (date,time) at some service point
-        boolean availibityOk = medDispatchRecs.stream()
-                .allMatch(medDispatchRec ->
-                    isDroneAvailableForDispatch(drone, medDispatchRec, dronesForServices)
-                );
-
-        if (!availibityOk) {
-            return false;
-        }
-
-        if (!maxCostOk(drone, medDispatchRecs, dronesForServices, servicePoints)) {
-            return false;
-        }
-
-    return true;
-    }
-
-
-    private boolean maxCostOk(Drone drone, List<MedDispatchRec> medDispatchRecs, List<DronesForService> dronesForServices, List<ServicePoint> servicePoints) {
-        //checks if there is any maxCost at all
-        boolean hasAnyMaxCost = medDispatchRecs.stream()
-                .map(MedDispatchRec::getRequirements)
-                .map(DispatchRec::getMaxCost)
-                .anyMatch(Objects::nonNull);
-
-        if(!hasAnyMaxCost){
-            return true;
-        }
-
-        //set n to be the size of the dispatch list, number of dispatches needede
-        int n = medDispatchRecs.size();
-        CapabilityDTO capability = drone.getCapability();
-
-        //check each dispatch that has a maxCost
-        for (MedDispatchRec dispatchRec :medDispatchRecs){
-            DispatchRec rec = dispatchRec.getRequirements();
-            Double maxCost = dispatchRec.getRequirements().getMaxCost();
-
-            //if maxCost is null this dispatch doesnt constrain cost
-            if(maxCost == null) {
-                continue;
-            }
-
-            //estimate how many moves are needed for this dispatch
-            long estimatedMoves = estimatedMovesForDelivery(drone, dispatchRec, dronesForServices, servicePoints);
-            //variable since depends on the moves
-            double variableCost = estimatedMoves* capability.getCostPerMove();
-            //"pack" cost for this drone and this dispatch
-            double packCost = capability.getCostInitial() + capability.getCostFinal() + variableCost;
-            //share per dispatch
-            double costShareForDispatch = packCost/n;
-            //enforce constraint
-            if (costShareForDispatch > maxCost) {
-                return false;
-            }
-        }
-        //if none of maxCost constraints were violated then true
-        return true;
-    }
-
-    //rough estimation of number of moves from suitable service point to delivery location
-    private long estimatedMovesForDelivery(Drone drone, MedDispatchRec dispatchRec, List<DronesForService> dronesForServices, List<ServicePoint> servicePoints) {
-        //assume 10000ish moves, to reject
-        final long DEFAULT_MOVES = 1000L;
-
-        //checks if no delivery location
-        LngLat delivery = dispatchRec.getDelivery();
-        if (delivery == null) {
-            return DEFAULT_MOVES;
-        }
-
-        //finds all service point ids where this drone is registered/active
-        List<Integer> servicePointIdsForDrone = dronesForServices.stream()
-                .filter(sp -> sp.getDrones().stream()
-                        .anyMatch(droneEntry -> droneEntry.getId().equals(drone.getId())))
-                .map(DronesForService::getServicePointId)
-                .collect(Collectors.toList());
-
-        //checks if drone is assigned to any service points
-        if (servicePointIdsForDrone.isEmpty()) {
-            return DEFAULT_MOVES;
-        }
-
-        double minDistance = Double.POSITIVE_INFINITY;
-
-        //checks all service points, find the closest to delivery loctation
-        for(Integer spId: servicePointIdsForDrone) {
-            ServicePoint sp = servicePoints.stream()
-                    .filter(s->s.getId().equals(spId))
-                    .findFirst()
-                    .orElse(null);
-
-            if(sp == null || sp.getLocation()==null){
-                continue;
-            }
-
-            LocationDTO loc = sp.getLocation();
-            LngLat spLocation = new LngLat(loc.getLng(), loc.getLat());
-
-            double distance = calculationService.calculateDistance(spLocation, delivery);
-            if(distance < minDistance) {
-                minDistance = distance;
-            }
-        }
-
-
-        //if we never found a valid distance , use defualt
-        if(!Double.isFinite(minDistance)) {
-            return DEFAULT_MOVES;
-        }
-
-        //convert distance to moves using global step size
-        long moves = (long) Math.ceil(minDistance/CalculationService.STEP);
-        //guard against zero moves
-        return moves > 0 ? moves : 1L;
-    }
-
-
-    private boolean isDroneAvailableForDispatch(Drone drone, MedDispatchRec dispatchRec, List<DronesForService> dronesForServices){
-        DayOfWeek dayOfWeek = dispatchRec.getDate().getDayOfWeek();
-
-        return dronesForServices.stream()
-                //Look at all drone entries across service points
-                .flatMap(servicepoint -> servicepoint.getDrones().stream())
-                //onlt this specific drone
-                .filter(droneEntry -> droneEntry.getId().equals(drone.getId()))
-                //flatten all availbility slots for this drone
-                .flatMap(droneEntry -> droneEntry.getAvailability().stream())
-                //keep only slots that match the dispatchs day of week
-                .filter(availability -> availability.getDayOfWeek() == dayOfWeek)
-                //is dispatch time inside any of the matching avaibility windows?
-                .anyMatch(availability -> {
-                    LocalTime from = availability.getFrom();
-                    LocalTime until = availability.getUntil();
-                    LocalTime dispatchTime = dispatchRec.getTime();
-                    return !dispatchTime.isBefore(from) && !dispatchTime.isAfter(until);
-
-                });
-    }
-
-
-
+    // 4) /query → query
 
 
     public List<String> query(List<QueryAttribute> queryAttributes) {
@@ -358,7 +196,7 @@ public class DroneService {
                 case "id" -> compareStrings(drone.getId(), operator, value);
                 case "cooling" -> compareBooleans(drone.getCapability().getCooling(), operator, value);
                 case "heating" -> compareBooleans(drone.getCapability().getHeating(), operator, value);
-                case "capacity" -> compareIntegers(drone.getCapability().getCapacity(), operator, value);
+                case "capacity" -> compareDoubles(drone.getCapability().getCapacity(), operator, value);
                 case "maxMoves" -> compareIntegers(drone.getCapability().getMaxMoves(), operator, value);
                 case "costPerMove" -> compareDoubles(drone.getCapability().getCostPerMove(), operator, value);
                 case "costInitial" -> compareDoubles(drone.getCapability().getCostInitial(), operator, value);
@@ -370,7 +208,6 @@ public class DroneService {
             return false; // parse error no match
         }
     }
-
 
     //methods for comparisons of each type
     //actual is type specific so we need 4 methods for each type
@@ -419,11 +256,679 @@ public class DroneService {
         double expectedDouble = Double.parseDouble(expected);
 
         return switch (operator) {
-            case "=" -> actual.equals(expectedDouble);
-            case "!=" -> !actual.equals(expectedDouble);
+            case "=" -> Math.abs(actual - expectedDouble) < 0.0001;
+            case "!=" -> Math.abs(actual - expectedDouble) >= 0.0001;
             case "<" -> actual < expectedDouble;
             case ">" -> actual > expectedDouble;
             default -> false;
         };
     }
+
+
+    // 5) /queryAvailableDrones → queryAvailableDrones
+
+
+    //Method to return list of drone ids that can satisfy medDispatchRec
+    public List<String> queryAvailableDrones(List<MedDispatchRec> medDispatchRecs){
+        //Handles special case if medDispatch is empty
+        if (medDispatchRecs == null || medDispatchRecs.isEmpty()) {
+            return retrieveService.getAllDrones().stream()
+                    .map(Drone::getId)
+                    .filter(Objects::nonNull)
+                    .collect((toList()));
+        }
+
+        //fetching data from external rest service on every call
+        List<Drone> drones  = retrieveService.getAllDrones();
+        List<DronesForService> dronesForServices = retrieveService.getAllDronesForService();
+        List<ServicePoint> servicePoints = retrieveService.getAllServicePoints();
+
+        //filters drones and keeps only those that can handle all dispatches
+        return drones.stream()
+                .filter(drone -> singleDroneFilter(drone, medDispatchRecs, dronesForServices, servicePoints))
+                .map(Drone::getId)
+                .filter(Objects::nonNull)
+                .collect(toList());
+    }
+
+    //Checks whether one specific drone can handle all the necessary requirements uses && logic
+    private boolean singleDroneFilter(Drone drone,
+                                      List<MedDispatchRec> medDispatchRecs,
+                                      List<DronesForService> dronesForServices,
+                                      List<ServicePoint> servicePoints) {
+
+        // 1) Same drone must be able to handle EACH dispatch individually
+        boolean allDispatchesFeasible = medDispatchRecs.stream()
+                .allMatch(rec -> canSingleDroneHandleDispatch(drone, rec, dronesForServices));
+
+        if (!allDispatchesFeasible) {
+            return false;
+        }
+
+        // 2) Check maxCost constraints across the whole “pack”
+        return maxCostOk(drone, medDispatchRecs, dronesForServices, servicePoints);
+    }
+
+
+    private boolean maxCostOk(Drone drone, List<MedDispatchRec> medDispatchRecs, List<DronesForService> dronesForServices, List<ServicePoint> servicePoints) {
+        //checks if there is any maxCost at all
+        boolean hasAnyMaxCost = medDispatchRecs.stream()
+                .map(MedDispatchRec::getRequirements)
+                .map(DispatchRec::getMaxCost)
+                .anyMatch(Objects::nonNull);
+
+        if(!hasAnyMaxCost){
+            return true;
+        }
+
+        //set n to be the size of the dispatch list, number of dispatches needed
+        int n = medDispatchRecs.size();
+        CapabilityDTO capability = drone.getCapability();
+
+        // 2) First pass: estimate totalMoves across ALL dispatches
+        long totalMoves = 0L;
+        for (MedDispatchRec dispatchRec : medDispatchRecs) {
+            long moves = estimatedMovesForDelivery(
+                    drone,
+                    dispatchRec,
+                    dronesForServices,
+                    servicePoints
+            );
+            totalMoves += moves;
+        }
+
+        // 3) Total cost for the whole “flight pack”
+        double totalCost = capability.getCostInitial()
+                + capability.getCostFinal()
+                + (totalMoves * capability.getCostPerMove());
+
+        // 4) Equal pro-rata share per dispatch (as per spec)
+        double costSharePerDispatch = totalCost / n;
+
+        // 5) Second pass: enforce each maxCost constraint
+        for (MedDispatchRec dispatchRec : medDispatchRecs) {
+            Double maxCost = dispatchRec.getRequirements().getMaxCost();
+            if (maxCost == null) {
+                continue;   // this dispatch doesn’t constrain cost
+            }
+
+            if (costSharePerDispatch > maxCost) {
+                return false;   // this drone is too expensive for that dispatch
+            }
+        }
+
+        // All maxCost constraints satisfied
+        return true;
+    }
+
+    //rough estimation of number of moves from suitable service point to delivery location
+    private long estimatedMovesForDelivery(Drone drone, MedDispatchRec dispatchRec, List<DronesForService> dronesForServices, List<ServicePoint> servicePoints) {
+        //assume 10000ish moves, to reject
+        final long DEFAULT_MOVES = 1000L;
+
+        //checks if no delivery location
+        LngLat delivery = dispatchRec.getDelivery();
+        if (delivery == null) {
+            return DEFAULT_MOVES;
+        }
+
+        //finds all service point ids where this drone is registered/active
+        List<Integer> servicePointIdsForDrone = dronesForServices.stream()
+                .filter(sp -> sp.getDrones().stream()
+                        .anyMatch(droneEntry -> droneEntry.getId().equals(drone.getId())))
+                .map(DronesForService::getServicePointId)
+                .toList();
+
+        //checks if drone is assigned to any service points
+        if (servicePointIdsForDrone.isEmpty()) {
+            return DEFAULT_MOVES;
+        }
+
+        double minDistance = Double.POSITIVE_INFINITY;
+
+        //checks all service points, find the closest to delivery location
+        for(Integer spId: servicePointIdsForDrone) {
+            ServicePoint sp = servicePoints.stream()
+                    .filter(s->s.getId().equals(spId))
+                    .findFirst()
+                    .orElse(null);
+
+            if(sp == null || sp.getLocation()==null){
+                continue;
+            }
+
+            LocationDTO loc = sp.getLocation();
+            LngLat spLocation = new LngLat(loc.getLng(), loc.getLat());
+
+            double distance = calculationService.calculateDistance(spLocation, delivery);
+            if(distance < minDistance) {
+                minDistance = distance;
+            }
+        }
+
+        //if we never found a valid distance , use default
+        if(!Double.isFinite(minDistance)) {
+            return DEFAULT_MOVES;
+        }
+
+        //convert distance to moves using global step size
+        long moves = (long) Math.ceil(minDistance/CalculationService.STEP);
+        //guard against zero moves
+        return moves > 0 ? moves : 1L;
+    }
+
+    private boolean isDroneAvailableForDispatch(Drone drone, MedDispatchRec dispatchRec, List<DronesForService> dronesForServices){
+        DayOfWeek dayOfWeek = dispatchRec.getDate().getDayOfWeek();
+
+        return dronesForServices.stream()
+                //Look at all drone entries across service points
+                .flatMap(forService -> forService.getDrones().stream())
+                //only this specific drone
+                .filter(droneEntry -> droneEntry.getId().equals(drone.getId()))
+                //flatten all availability slots for this drone
+                .flatMap(droneEntry -> droneEntry.getAvailability().stream())
+                //keep only slots that match the dispatches day of week
+                .filter(availability -> availability.getDayOfWeek() == dayOfWeek)
+                //is dispatch time inside any of the matching availability windows?
+                .anyMatch(availability -> {
+                    LocalTime from = availability.getFrom();
+                    LocalTime until = availability.getUntil();
+                    LocalTime dispatchTime = dispatchRec.getTime();
+                    return !dispatchTime.isBefore(from) && !dispatchTime.isAfter(until);
+
+                });
+    }
+
+
+    // 6) /calcDeliveryPath → calcDeliveryPath
+
+
+    public CalcDeliveryPathResult calcDeliveryPath(List<MedDispatchRec> medDispatchRecs) {
+        //Fetch data from external api
+
+
+        List<Drone> allDrones = retrieveService.getAllDrones();
+        List<DronesForService> dfsList = retrieveService.getAllDronesForService();
+        List<ServicePoint> servicePoints = retrieveService.getAllServicePoints();
+
+        //fetch restricted areas and convert to polygons of LngLat
+        List<List<LngLat>> restrictedPolygons = retrieveService.getAllRestrictedAreas().stream()
+                .map(area -> area.getVertices().stream()
+                        .map(v-> new LngLat(v.getLng(), v.getLat()))
+                        .toList())
+                .toList();
+
+
+        //deliveries you haven't made yet
+        List<MedDispatchRec> remaining = new ArrayList<>(medDispatchRecs);
+        //final list of flight paths (one per drone flight)
+        List<DronePathDTO> dronePaths = new ArrayList<>();
+
+        long totalMoves = 0L;
+        double totalCost = 0.0;
+
+        //GREEDY - { iteratively scan remaining deliveries, greedily pick the first that fits all necessary attributes, keep going until nothing fits}
+        // while there are deliveries left
+        while (!remaining.isEmpty()) {
+            MedDispatchRec seed = remaining.get(0); //take first delivery as a seed(starting job) for a new flight
+
+            DroneAssignment assignment = pickDroneForDispatch(seed, allDrones, dfsList, servicePoints, restrictedPolygons
+            );
+
+            if (assignment == null) {
+                break;
+            }
+
+            Drone drone = assignment.drone();
+            ServicePoint servicePoint = assignment.servicePoint();
+
+            List<DeliveryPathDTO> deliveriesForDrone = new ArrayList<>(); //all segments this drone flies in one flight path, each with its own path
+            LngLat serviceLoc = toLngLat(servicePoint.getLocation()); //starting point
+            LngLat currentPos = serviceLoc; //where drone currently is e.g starts at service point
+
+            long movesForThisDrone = 0L; //number of moves used in this flight
+            double capacityUsed = 0.0; //total payload capacity used in this flight
+            int maxMoves = drone.getCapability().getMaxMoves(); //move constraint for this drone
+            double droneCapacity = drone.getCapability().getCapacity(); //capacity constraint for this drone
+
+            //try to pack as many deliveries as possible into one flight
+
+            boolean addedAny;
+            do {
+                addedAny = false;
+
+                for(Iterator<MedDispatchRec> it = remaining.iterator(); it.hasNext(); ) {
+                    MedDispatchRec candidate = it.next();
+
+                    //capacity constraint per flight
+                    Double capNeeded = candidate.getRequirements().getCapacity();
+                    double neededCap = capNeeded == null ? 0.0 : capNeeded;
+                    if(capacityUsed + neededCap > droneCapacity) { //if candidates capacity is larger than the drone's then skip
+                        continue;
+                    }
+
+                    //feasibility check(per dispatch per drone) e.g is this drone even able to handle dispatch with its assets.
+                    //checks if
+                        // this drone has enough capacity for this dispatch
+                        //cooling/heating requirements
+                        //availability requirements
+                    if(!canSingleDroneHandleDispatch(drone, candidate, dfsList)) {
+                        continue;
+                    }
+
+                    LngLat deliveryLoc = candidate.getDelivery();
+
+
+                    //Path out: from current position to delivery location, avoiding the restricted areas
+                    List<LngLat> pathOut = findPathAvoidingRestricted(currentPos, deliveryLoc, restrictedPolygons);
+                    int movesOut = Math.max(0, pathOut.size() -1 );
+
+
+                    //Path back: from delivery location back to the service point, avoiding restricted areas
+                    List<LngLat> pathBack = findPathAvoidingRestricted(deliveryLoc, serviceLoc, restrictedPolygons);
+                    int movesBack = Math.max(0, pathBack.size() -1);
+
+
+                    //"If I add delivery now, then go back to service point will I exceed maxMoves")
+                    //projected = (Moves already used + going from currentPos to delivery + hover move + going back from delivery to service point)
+                    long projected = movesForThisDrone + movesOut + 1 + movesBack;
+                    if (projected > maxMoves) {
+                        //cant add delivery without breaking max moves
+
+                        continue;
+                    }
+
+
+                    //If all constraints are OK then we can add delivery
+                    //deliveryPath is built by copying pathOut
+                    List<LngLat> deliveryFlightPath = new ArrayList<>(pathOut);
+                    //gets last pont in the path last=[Pk], appends it to deliveryFLightPath -> this adds the hover point
+                    if (!deliveryFlightPath.isEmpty()) {
+                        LngLat last = deliveryFlightPath.get(deliveryFlightPath.size() - 1);
+                        deliveryFlightPath.add(last);
+                    }
+
+                    //add this flight path with id to the whole dispatch flight
+                    deliveriesForDrone.add(
+                            new DeliveryPathDTO(candidate.getId(), deliveryFlightPath)
+                    );
+
+                    //Accumulate/Update the variables
+                    movesForThisDrone += movesOut + 1;
+                    capacityUsed += neededCap;
+                    LngLat hoverPoint = deliveryFlightPath.get(deliveryFlightPath.size() - 1);
+                    currentPos = hoverPoint;
+
+                    //remove this dispatch from remaining
+                    it.remove();
+                    addedAny = true;
+                    break;
+                }
+            } while (addedAny && !remaining.isEmpty());//Once you cant add anymore deliveries to this flight
+
+            //compute a final return path from wherever you ended up (CurrentPos) back to service location
+            List<LngLat> pathReturn = findPathAvoidingRestricted(currentPos, serviceLoc, restrictedPolygons);
+            int movesBack = Math.max(0, pathReturn.size() - 1);
+            movesForThisDrone += movesBack; // add those moves to movesFor This Drone
+
+            deliveriesForDrone.add(
+                    new DeliveryPathDTO(null, pathReturn)
+            );  //"return leg"
+
+            //All segments for this flight, linked to one drone
+            DronePathDTO dronePath = new DronePathDTO(drone.getId(), deliveriesForDrone);
+            dronePaths.add(dronePath);
+
+            //Cost formula for that flight: initial + final + perMove*Moves used
+            double costForDrone = drone.getCapability().getCostInitial() + drone.getCapability().getCostFinal() + movesForThisDrone*drone.getCapability().getCostPerMove();
+
+            //Accumalate into global totals
+            totalMoves += movesForThisDrone;
+            totalCost += costForDrone;
+        }
+
+
+        //Returning total cost across all flights, totalMoves across all flights and, detailed paths
+        return new CalcDeliveryPathResult(totalCost, totalMoves, dronePaths);
+    }
+
+    //pick a pair of (drone, service point) that can handle this one dispatch as a whole flight(out,hover, back) without breaking constraints
+    private  DroneAssignment pickDroneForDispatch(MedDispatchRec dispatchRec, List<Drone> drones, List<DronesForService> dfsList, List<ServicePoint> servicePoints, List<List<LngLat>> restrictedPolygons) {
+
+        //extracting service point Id from drones for service list, finding corresponding service Point
+        for (DronesForService dfs : dfsList) {
+            Integer spId = dfs.getServicePointId();
+            ServicePoint sp = servicePoints.stream()
+                    .filter(s->s.getId().equals(spId))
+                    .findFirst()
+                    .orElse(null);
+            if (sp==null) continue;
+
+            //Iterating for drones at corresponding service point
+            for(cw1.DTO.Internal.DroneAvailable da: dfs.getDrones()) {
+                Drone drone = drones.stream()
+                        //find matching drone in the full drones list by ID
+                        .filter(d->d.getId().equals(da.getId()))
+                        .findFirst()
+                        .orElse(null);
+                if (drone == null) continue;
+
+
+                //per-dispatch feasibility
+                //cheap non pathfinding check.
+                if(!canSingleDroneHandleDispatch(drone,dispatchRec,dfsList)) {
+                    continue;
+                }
+
+                //path out and back from this service point
+                //converting the service points locationDTO to LngLat form
+                LngLat serviceLoc = toLngLat(sp.getLocation());
+                //Delivery location
+                LngLat delivery = dispatchRec.getDelivery();
+
+                //Find the path from service Point to the Delivery Location [Uses A* and avoids restricted Areas]
+                List<LngLat> out = findPathAvoidingRestricted(serviceLoc, delivery, restrictedPolygons);
+
+                //Find the path from Delivery Location to service point [Uses A* and avoids restricted Areas]
+                List<LngLat> back = findPathAvoidingRestricted(delivery,serviceLoc, restrictedPolygons);
+
+                int moves = Math.max(0, out.size() - 1) // out
+                        + 1                           // hover
+                        + Math.max(0, back.size() - 1); // back
+
+                //max moves constraint
+                //explicitly enforcing maxMoves for this particular (drone, servicePoint pair)
+                if(moves > drone.getCapability().getMaxMoves()) {
+                    continue;
+                }
+
+
+                return new DroneAssignment(drone,sp);
+            }
+        }
+        return null;
+    }
+
+    //Ignoring path length, cost and other deliveries, can this one drone handle this one dispatch at some service point, given its capabilities and availability
+    private boolean canSingleDroneHandleDispatch(Drone drone, MedDispatchRec dispatchRec, List<DronesForService> dfslist) {
+        //get nested requirements from dispatchRec
+        DispatchRec req = dispatchRec.getRequirements();
+
+        Double cap = req.getCapacity();
+        if ( cap!= null && drone.getCapability().getCapacity() < cap) {
+            return false;
+        }
+
+        Boolean coolingRequired = req.getCooling();
+        if (Boolean.TRUE.equals(coolingRequired) && !Boolean.TRUE.equals(drone.getCapability().getCooling())) {
+            return false;
+        }
+
+        Boolean heatingRequired = req.getHeating();
+        if(Boolean.TRUE.equals(heatingRequired) && !Boolean.TRUE.equals(drone.getCapability().getHeating())) {
+            return false;
+        }
+
+        return isDroneAvailableForDispatch(drone, dispatchRec, dfslist);
+    }
+
+    private LngLat toLngLat(LocationDTO loc) {
+        return new LngLat(loc.getLng(), loc.getLat());
+    }
+
+    private List<LngLat> findPathAvoidingRestricted(LngLat start,
+                                                    LngLat target,
+                                                    List<List<LngLat>> restrictedPolygons) {
+
+
+        // If already "close enough", no path needed beyond start
+        //Using the CLOSE_THRESHOLD
+        //IF start is within small radius of target , then consider it "done"
+        if (calculationService.isCloseTo(start, target)) {
+            return List.of(start);
+        }
+
+        // PriorityQueue(min heap) of frontier nodes, always gets the node with smallest f, "places we might explore next
+        PriorityQueue<Node> open = new PriorityQueue<>(Comparator.comparingDouble(n -> n.f));
+        //Map from a discrete grid key (x,y) to Node object
+        // if reached same grid cell with cheaper g, you can update it
+        Map<String, Node> allNodes = new HashMap<>();
+        //Set of grid keys already processed and finalised
+        //Best path to these exists already
+        Set<String> closed = new HashSet<>();
+
+        //StartNode
+            //point=start
+            //g = 0.0 ( no cost from start to itself)
+            //f = g + h = 0 + heuristic(start, target)
+            //parent = null (Started here)
+
+        Node startNode = new Node(start, 0.0, heuristic(start, target), null);
+        //add start to open node(all things needed to explore
+        open.add(startNode);
+        allNodes.put(key(start), startNode);
+
+        int safety = 500_000; // hard cap on node expansions
+
+        //holds node where decided that target is reached
+        Node goalNode = null;
+
+
+        while (!open.isEmpty() && safety-- > 0) {
+            //gives node with lowest f(best estimated total cost)
+            Node current = open.poll();
+            String currentKey = key(current.point);
+
+            //compute grid key for current.point:key(current.point)
+            //if key already in closed
+                // has been superseded by a better path
+                //node is obsolete
+            if (closed.contains(currentKey)) {
+                continue;
+            }
+            closed.add(currentKey);
+
+            //Since current.point doesnt need to be exactly target , "close enough" we use the same CLOSE_THRESHOLD
+            // Reached target neighbourhood
+            if (calculationService.isCloseTo(current.point, target)) {
+                goalNode = current;
+                break;
+            }
+
+            // Explore neighbours
+
+            //For each angle in allowed_angles 0,22.5,45...
+            //use nextPosition to move one STEP in that direction
+            //each neighbour is exactly one grid step away
+            for (double angle : ALLOWED_ANGLES) {
+                LngLat neighbourPoint = calculationService.nextPosition(current.point, angle);
+
+                //For each potential step from current to neighbourPoint, check if this segment enters restricted area
+                // Skip if this move would cross a restricted area
+                if (crossesRestricted(current.point, neighbourPoint, restrictedPolygons)) {
+                    continue;
+                }
+
+                //If best path finalised to grid cell dont consider again
+                String neighbourKey = key(neighbourPoint);
+                if (closed.contains(neighbourKey)) {
+                    continue;
+                }
+
+                //if we go from current to neighbourPoint, how much will total Distance from start be
+                // current g + one STEP
+                double tentativeG = current.g + CalculationService.STEP;
+                //Check if we already have this node
+                Node neighbour = allNodes.get(neighbourKey);
+
+                //Two situations
+                    //never seen this grid cell before OR
+                    //Seen but found a cheaper path now
+                if (neighbour == null || tentativeG < neighbour.g) {
+                    //compute straight line distance to target
+                    double h = heuristic(neighbourPoint, target);
+                    if (neighbour == null) {
+                        //if first time visiting neighbour
+                        //Create new Node
+                            //point= neighbourPoint
+                            //g = tentativeG
+                            //f = g + h
+                            //parent = current
+                        neighbour = new Node(neighbourPoint, tentativeG, tentativeG + h, current);
+                        //Insert into allNodes
+                        allNodes.put(neighbourKey, neighbour);
+                    } else {
+                        //If we already had this node then update its g, f and parent to reflect better path
+                        neighbour.g = tentativeG;
+                        neighbour.f = tentativeG + h;
+                        neighbour.parent = current;
+                    }
+                    open.add(neighbour);
+                }
+            }
+        }
+
+        // If we never reached close to the target, fall back to start-only path
+        if (goalNode == null) {
+            return List.of(start);
+        }
+
+        // Reconstruct path from goal back to start
+            //Follow parent backwards [ Goal node -> its parent -> its parent ->........ startNode (where parent is null)]
+        List<LngLat> path = new ArrayList<>();
+        Node current = goalNode;
+        while (current != null) {
+            path.add(current.point);
+            current = current.parent;
+        }
+        //Switch the path to start at StartNode
+        Collections.reverse(path);
+
+        return path;
+    }
+
+
+    //If taken one step from "from" to "to" , does step cross restricted
+    private boolean crossesRestricted(LngLat from,
+                                      LngLat to,
+                                      List<List<LngLat>> restrictedPolygons) {
+
+        for (List<LngLat> poly : restrictedPolygons) {
+            // If either endpoint lies inside the polygon, treat as crossing
+            if (calculationService.isInRegion(from, poly)
+                    || calculationService.isInRegion(to, poly)) {
+                return true;
+            }
+
+            // Check for segment–edge intersections
+            for (int i = 0; i < poly.size() - 1; i++) {
+                LngLat a = poly.get(i);
+                LngLat b = poly.get(i + 1);
+
+                if (segmentsIntersect(from, to, a, b)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Robust segment–segment intersection
+    private boolean segmentsIntersect(LngLat p1, LngLat p2,
+                                      LngLat q1, LngLat q2) {
+
+        double o1 = orientation(p1, p2, q1);
+        double o2 = orientation(p1, p2, q2);
+        double o3 = orientation(q1, q2, p1);
+        double o4 = orientation(q1, q2, p2);
+
+        // General case: strictly different orientations
+        if (o1 * o2 < 0 && o3 * o4 < 0) {
+            return true;
+        }
+
+        // Collinear / touching cases – use onSegment-style checks
+        if (almostZero(o1) && onSegment(p1, p2, q1)) return true;
+        if (almostZero(o2) && onSegment(p1, p2, q2)) return true;
+        if (almostZero(o3) && onSegment(q1, q2, p1)) return true;
+        if (almostZero(o4) && onSegment(q1, q2, p2)) return true;
+
+        return false;
+    }
+
+    // Signed area / orientation: >0 left turn, <0 right turn, 0 collinear
+    private double orientation(LngLat a, LngLat b, LngLat c) {
+        return (b.getLng() - a.getLng()) * (c.getLat() - a.getLat())
+                - (b.getLat() - a.getLat()) * (c.getLng() - a.getLng());
+    }
+
+    private boolean almostZero(double v) {
+        return Math.abs(v) < 1e-12;
+    }
+
+    // Check if point p lies on segment [a,b] (with small tolerance)
+    private boolean onSegment(LngLat a, LngLat b, LngLat p) {
+        if (!almostZero(orientation(a, b, p))) {
+            return false;
+        }
+
+        double minX = Math.min(a.getLng(), b.getLng()) - 1e-12;
+        double maxX = Math.max(a.getLng(), b.getLng()) + 1e-12;
+        double minY = Math.min(a.getLat(), b.getLat()) - 1e-12;
+        double maxY = Math.max(a.getLat(), b.getLat()) + 1e-12;
+
+        double x = p.getLng();
+        double y = p.getLat();
+
+        return x >= minX && x <= maxX && y >= minY && y <= maxY;
+    }
+
+
+
+
+    // Unique key for a grid point. nextPosition always yields discrete multiples of STEP.
+    //key(p) is identity of grid cell in A*
+    private String key(LngLat p) {
+        //dividing by STEP converts world coordinates to grid coordinates
+
+        //Steps from east/west from 0
+        long x = Math.round(p.getLng() / CalculationService.STEP);
+        //steps north/south from 0
+        long y = Math.round(p.getLat() / CalculationService.STEP);
+
+        //returning hashable key for use in MAP and SET
+        return x + "," + y;
+    }
+
+    // Straight-line distance as heuristic
+    private double heuristic(LngLat from, LngLat to) {
+        return calculationService.calculateDistance(from, to);
+    }
+
+
+    // 7) /calcDeliveryPathAsGeoJson → calcDeliveryPathAsGeoJson
+
+
+    public GeoJsonLineString calcDeliveryPathAsGeoJson(List<MedDispatchRec> medDispatchRecs) {
+
+        CalcDeliveryPathResult result = calcDeliveryPath(medDispatchRecs);
+
+        if(result.getDronePaths() == null || result.getDronePaths().isEmpty() ) {
+            return new GeoJsonLineString("LineString", List.of());
+        }
+
+        DronePathDTO dronePath = result.getDronePaths().get(0);
+
+        List<List<Double>> coordinates = new ArrayList<>();
+
+        for (DeliveryPathDTO deliveryPath:dronePath.getDeliveries()) {
+            if(deliveryPath.getFlightPath() == null) continue;
+            for (LngLat point : deliveryPath.getFlightPath()) {
+                coordinates.add(List.of(point.getLng(), point.getLat()));
+            }
+        }
+
+        return new GeoJsonLineString("LineString", coordinates);
+    }
+
 }

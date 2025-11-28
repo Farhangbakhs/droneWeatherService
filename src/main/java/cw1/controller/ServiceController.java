@@ -3,18 +3,21 @@ package cw1.controller;
 
 import cw1.DTO.External.Drone;
 import cw1.DTO.*; // your request DTOs (DistanceRequest, NextPositionRequest, RegionRequest, LngLat, etc.)
+import cw1.DTO.Internal.CalcDeliveryPathResult;
 import cw1.service.CalculationService;
 import cw1.service.DroneService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import cw1.DTO.Internal.CalcDeliveryPathResult;
+import cw1.DTO.Internal.GeoJsonLineString;
+import cw1.DTO.MedDispatchRec;
+
 
 import java.util.List;
 
-/**
- * REST endpoints for drone navigation calculations + drone lookup.
- */
+
 @RestController
 @RequestMapping("/api/v1")
 public class ServiceController {
@@ -88,9 +91,22 @@ public class ServiceController {
     }
 
     @PostMapping("/queryAvailableDrones")
-    public List<String> queryAvailableDrones(@Valid @RequestBody List<MedDispatchRec> medDispatchRecReq) {
+    public List<String> queryAvailableDrones( @RequestBody List<MedDispatchRec> medDispatchRecReq) {
         return droneService.queryAvailableDrones(medDispatchRecReq);
     }
 
+
+    @PostMapping("/calcDeliveryPath")
+    public CalcDeliveryPathResult calcDeliveryPath(@Valid @RequestBody List<MedDispatchRec> body) {
+        return droneService.calcDeliveryPath(body);
+    }
+
+    @PostMapping("/calcDeliveryPathAsGeoJson")
+    public GeoJsonLineString calcDeliveryPathAsGeoJson(@Valid @RequestBody List<MedDispatchRec> body) {
+        return droneService.calcDeliveryPathAsGeoJson(body);
+    }
+
 }
+
+
 

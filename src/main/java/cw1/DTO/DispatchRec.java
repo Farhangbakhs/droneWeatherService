@@ -16,6 +16,6 @@ import lombok.AllArgsConstructor;
 public class DispatchRec {
     private Boolean cooling;
     private Boolean heating;
-    private Integer capacity;
+    private Double capacity;
     private Double maxCost;
 }

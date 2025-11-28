@@ -3,6 +3,8 @@ package cw1.DTO;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.DecimalMax;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class NextPositionRequest {
@@ -11,6 +13,9 @@ public class NextPositionRequest {
     @NotNull
     private LngLat start;
 
+
+    @DecimalMin("0.0")
+    @DecimalMax("360.0")
     @NotNull
     private Double angle;
 

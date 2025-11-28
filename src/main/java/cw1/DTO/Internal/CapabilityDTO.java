@@ -13,7 +13,7 @@ import lombok.AllArgsConstructor;
 public class CapabilityDTO {
     private Boolean cooling;
     private Boolean heating;
-    private Integer capacity;
+    private Double capacity;
     private Integer maxMoves;
     private Double costPerMove;
     private Double costInitial;

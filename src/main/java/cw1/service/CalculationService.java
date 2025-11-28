@@ -47,6 +47,10 @@ public class CalculationService {
         }
 
         // ray casting for interior
+        return isInside(point, poly);
+    }
+
+    private static boolean isInside(LngLat point, List<LngLat> poly) {
         boolean inside = false;
         for (int i = 0, j = poly.size() - 1; i < poly.size(); j = i++) {
             LngLat vi = poly.get(i);
