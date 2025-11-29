@@ -418,6 +418,11 @@ public class DroneService {
     }
 
     private boolean isDroneAvailableForDispatch(Drone drone, MedDispatchRec dispatchRec, List<DronesForService> dronesForServices){
+        // If date/time are not provided, skip availability check (weather-aware queries)
+        if (dispatchRec.getDate() == null || dispatchRec.getTime() == null) {
+            return true;
+        }
+
         DayOfWeek dayOfWeek = dispatchRec.getDate().getDayOfWeek();
 
         return dronesForServices.stream()
