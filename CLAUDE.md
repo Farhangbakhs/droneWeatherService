@@ -1,7 +1,7 @@
 # Weather-Aware Drone Delivery System - Complete Feature Documentation
 
-**Version: 3.0.0 (CW3 Extension with Testing Mode)
-**Last Updated**: November 29, 2025
+**Version**: 3.0.0 (CW3 Extension with Testing Mode)
+**Last Updated**: November 30, 2025
 **Status**: Production Ready
 
 ---
@@ -214,6 +214,27 @@ React 18.3.1
 - **OpenWeatherMap API**: Current Weather + 5-day Forecast
 - **ILP Service**: Drones, Service Points, Restricted Zones (CW2 base)
 
+### Deployment Options
+
+**Docker Deployment (Recommended)**
+```
+Docker 20.10+
+ Docker Compose 2.0+
+ Multi-stage build (Alpine Linux)
+ Health checks and monitoring
+ ~150MB final image size
+ Production-ready containerization
+```
+
+**Manual Deployment (Alternative)**
+```
+Local development environment
+ Direct Java/Maven execution
+ Frontend with Vite dev server
+ No containerization overhead
+ Ideal for development/debugging
+```
+
 ### Project Structure
 
 ```
@@ -295,16 +316,42 @@ ilp_submission_3/
 
 ### Prerequisites
 
-**Backend:**
-- Java 21 or higher
-- Maven 3.6+
+**Recommended - Docker Deployment:**
+- Docker 20.10+ and Docker Compose 2.0+
 - OpenWeatherMap API key ([Get free key](https://openweathermap.org/api))
 
-**Frontend:**
-- Node.js 18+ and npm
-- Modern web browser (Chrome, Firefox, Edge, Safari)
+**Alternative - Manual Deployment:**
+- Java 21 or higher
+- Maven 3.6+
+- Node.js 18+ and npm (for frontend)
+- OpenWeatherMap API key
 
-### Installation Steps
+### Quick Start with Docker (Recommended)
+
+**5-Minute Deployment:**
+
+```bash
+# 1. Clone repository
+git clone https://github.com/yourusername/ilp_submission_3.git
+cd ilp_submission_3
+
+# 2. Set API key
+echo "WEATHER_API_KEY=your_api_key_here" > .env
+
+# 3. Start application
+docker-compose up -d
+
+# 4. Verify deployment
+curl http://localhost:8080/actuator/health
+```
+
+ **Done!** Backend running at `http://localhost:8080`
+
+For detailed Docker deployment instructions, see [DOCKER_GUIDE.md](./DOCKER_GUIDE.md) or [DOCKER_QUICKSTART.md](./DOCKER_QUICKSTART.md).
+
+### Manual Installation (Alternative)
+
+If you prefer to run without Docker:
 
 #### 1. Clone Repository
 ```bash
@@ -336,13 +383,13 @@ mvnw.cmd spring-boot:run
 
 Backend will start on `http://localhost:8080`
 
-#### 4. Install Frontend Dependencies
+#### 4. Install Frontend Dependencies (Optional)
 ```bash
 cd frontend
 npm install
 ```
 
-#### 5. Start Frontend
+#### 5. Start Frontend (Optional)
 ```bash
 npm run dev
 ```
@@ -1140,28 +1187,39 @@ curl http://localhost:8080/actuator/health
 
 ### Useful Commands
 
-**Start Backend**:
+**Docker Deployment (Recommended)**:
 ```bash
+# Start application
+docker-compose up -d
+
+# Stop application
+docker-compose down
+
+# View logs
+docker-compose logs -f backend
+
+# Rebuild after changes
+docker-compose up -d --build
+
+# Check status
+docker-compose ps
+```
+
+**Manual Deployment (Alternative)**:
+```bash
+# Start Backend
 ./mvnw spring-boot:run
-```
 
-**Start Frontend**:
-```bash
+# Start Frontend
 cd frontend && npm run dev
-```
 
-**Build Backend JAR**:
-```bash
+# Build Backend JAR
 mvn clean package
-```
 
-**Build Frontend Production**:
-```bash
+# Build Frontend Production
 cd frontend && npm run build
-```
 
-**Run Backend Tests**:
-```bash
+# Run Backend Tests
 mvn test
 ```
 
@@ -1189,20 +1247,27 @@ mvn test
 
 **Author**: Claude (Anthropic AI)
 **Created**: November 29, 2025
-**Last Updated**: November 29, 2025
-**Version: 3.0.0
+**Last Updated**: November 30, 2025
+**Version**: 3.0.0
 **Status**: Production Ready
 **Project**: CW3 Extension - Weather-Aware Drone Delivery System
+**Deployment**: Docker Compose (Recommended) | Manual (Alternative)
 
 ---
 
 ## Additional Resources
 
-- **Original CW3 Documentation**: See `Cw3MD.md` for detailed technical documentation
-- **Testing Mode Implementation**: See `TESTING_MODE_BYPASS_IMPLEMENTATION.md` for performance optimization details
-- **Quick Start Guide**: See `QUICK_START.md` for rapid setup instructions
-- **Demo Guide**: See `START_DEMO.md` for demonstration scenarios
-- **Project Status**: See `FINAL_STATUS.md` for completion checklist
+### Deployment Documentation
+- **Docker Quick Start**: See [DOCKER_QUICKSTART.md](./DOCKER_QUICKSTART.md) for 5-minute Docker deployment
+- **Docker Deployment Guide**: See [DOCKER_GUIDE.md](./DOCKER_GUIDE.md) for comprehensive Docker documentation
+- **Deployment Checklist**: See [DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md) for verification steps
+- **Documentation Index**: See [DOCUMENTATION_INDEX.md](./DOCUMENTATION_INDEX.md) for all documentation files
+
+### Technical Documentation
+- **Main README**: See [README.md](./README.md) for project overview
+- **Original CW3 Documentation**: See `Cw3MD.md` for detailed technical documentation (if available)
+- **Testing Mode Implementation**: See `TESTING_MODE_BYPASS_IMPLEMENTATION.md` for performance optimization details (if available)
+- **Frontend Testing Guide**: See `frontend/TESTING_MODE_README.md` for frontend-specific testing documentation
 
 ---
 
