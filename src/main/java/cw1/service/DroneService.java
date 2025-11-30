@@ -481,7 +481,12 @@ public class DroneService {
             );
 
             if (assignment == null) {
-                break;
+                // No drone can fulfill this delivery's requirements
+                throw new IllegalArgumentException(
+                        "No available drone can fulfill the delivery requirements. " +
+                        "Possible reasons: maxCost too low, required capabilities (cooling/heating) not available, " +
+                        "capacity constraints, or availability conflicts."
+                );
             }
 
             Drone drone = assignment.drone();
@@ -597,17 +602,252 @@ public class DroneService {
         return new CalcDeliveryPathResult(totalCost, totalMoves, dronePaths);
     }
 
+    /**
+     * TESTING MODE: Calculate delivery path with explicit service point coordinates
+     *
+     * This method bypasses the slow ILP service point endpoint query by using
+     * the explicitly provided service point coordinates. This dramatically speeds
+     * up path calculation for international testing scenarios (30-60s → 2-3s).
+     *
+     * Key Differences from calcDeliveryPath():
+     * - Does NOT call retrieveService.getAllServicePoints() (slow ILP query)
+     * - Creates a synthetic ServicePoint from provided coordinates
+     * - Still fetches drones and restricted areas (required for pathfinding)
+     * - Uses same pathfinding logic as normal mode
+     *
+     * @param medDispatchRecs List of delivery dispatches
+     * @param explicitServicePoint Coordinates to use as the service point
+     * @return CalcDeliveryPathResult with path, cost, and moves
+     */
+    public CalcDeliveryPathResult calcDeliveryPathWithExplicitServicePoint(
+            List<MedDispatchRec> medDispatchRecs,
+            LngLat explicitServicePoint) {
+
+        System.out.println(" FAST PATH: Using explicit service point, skipping ILP query");
+        System.out.println("   Service Point: " + explicitServicePoint);
+
+        // Fetch data from external API (but skip slow service points query)
+        List<Drone> allDrones = retrieveService.getAllDrones();
+        List<DronesForService> dfsList = retrieveService.getAllDronesForService();
+
+        // Create a synthetic ServicePoint from the explicit coordinates
+        // This allows us to reuse existing pathfinding logic
+        ServicePoint syntheticServicePoint = new ServicePoint();
+        syntheticServicePoint.setId(999);  // Synthetic ID
+        syntheticServicePoint.setName("Testing Mode Service Point");
+
+        // Set location using LocationDTO format
+        LocationDTO location = new LocationDTO();
+        location.setLng(explicitServicePoint.getLng());
+        location.setLat(explicitServicePoint.getLat());
+        syntheticServicePoint.setLocation(location);
+
+        // Create a single-element service points list
+        List<ServicePoint> servicePoints = List.of(syntheticServicePoint);
+
+        System.out.println("   Created synthetic service point at (" +
+            explicitServicePoint.getLat() + ", " + explicitServicePoint.getLng() + ")");
+
+        // CRITICAL FIX: Create synthetic drone-service associations
+        // Map ALL drones to our synthetic service point so they can be selected
+        // Structure: DronesForService contains servicePointId and a list of DroneAvailable
+        List<DroneAvailable> availableDrones = new ArrayList<>();
+        for (Drone drone : allDrones) {
+            // Create a DroneAvailable with default 24/7 availability
+            DroneAvailable available = new DroneAvailable();
+            available.setId(drone.getId());
+            // We'll skip availability check in testing mode by making drones always available
+            available.setAvailability(List.of());  // Empty list = no restrictions
+            availableDrones.add(available);
+        }
+
+        DronesForService syntheticDfs = new DronesForService();
+        syntheticDfs.setServicePointId(999);  // Our synthetic service point ID
+        syntheticDfs.setDrones(availableDrones);
+
+        List<DronesForService> syntheticDfsList = List.of(syntheticDfs);
+
+        System.out.println("   Created synthetic drone-service association with " +
+            availableDrones.size() + " drones");
+
+        // Fetch restricted areas (still needed for pathfinding)
+        List<List<LngLat>> restrictedPolygons = retrieveService.getAllRestrictedAreas().stream()
+                .map(area -> area.getVertices().stream()
+                        .map(v -> new LngLat(v.getLng(), v.getLat()))
+                        .toList())
+                .toList();
+
+        // Deliveries you haven't made yet
+        List<MedDispatchRec> remaining = new ArrayList<>(medDispatchRecs);
+        // Final list of flight paths (one per drone flight)
+        List<DronePathDTO> dronePaths = new ArrayList<>();
+
+        long totalMoves = 0L;
+        double totalCost = 0.0;
+
+        // GREEDY: Iteratively scan remaining deliveries, greedily pick the first that fits
+        while (!remaining.isEmpty()) {
+            MedDispatchRec seed = remaining.get(0);
+
+            // Pick a (drone, service point) pair - will use our synthetic service point
+            // Use syntheticDfsList instead of dfsList so drones can be associated with our synthetic service point
+            DroneAssignment assignment = pickDroneForDispatch(seed, allDrones, syntheticDfsList, servicePoints, restrictedPolygons);
+
+            if (assignment == null) {
+                throw new IllegalArgumentException(
+                    "No drone available to fulfill dispatch requirements for delivery to: " +
+                    seed.getDelivery()
+                );
+            }
+
+            Drone drone = assignment.drone();
+            ServicePoint servicePoint = assignment.servicePoint();
+
+            System.out.println("\n Selected drone: " + drone.getId() +
+                " for delivery to (" + seed.getDelivery().getLat() + ", " + seed.getDelivery().getLng() + ")");
+
+            // Starting point is the service point
+            LngLat serviceLoc = toLngLat(servicePoint.getLocation());
+            LngLat currentPos = serviceLoc;
+
+            List<MedDispatchRec> batchDeliveries = new ArrayList<>();
+            batchDeliveries.add(seed);
+            remaining.remove(seed);
+
+            List<LngLat> flightPath = new ArrayList<>();
+            flightPath.add(currentPos);
+
+            long movesForThisDrone = 0L;
+            double costForThisDrone = 0.0;
+
+            // Calculate path for each delivery in the batch
+            for (MedDispatchRec delivery : batchDeliveries) {
+                LngLat deliveryLocation = delivery.getDelivery();
+
+                // Path to delivery location
+                List<LngLat> pathToDelivery = findPathAvoidingRestricted(currentPos, deliveryLocation, restrictedPolygons);
+
+                if (pathToDelivery.isEmpty()) {
+                    throw new IllegalArgumentException(
+                        "No valid path found from service point to delivery location: " + deliveryLocation
+                    );
+                }
+
+                flightPath.addAll(pathToDelivery);
+                movesForThisDrone += pathToDelivery.size() - 1;  // Don't count the starting position
+
+                // Hover move
+                flightPath.add(deliveryLocation);
+                movesForThisDrone++;
+
+                currentPos = deliveryLocation;
+            }
+
+            // Path back to service point
+            List<LngLat> pathBack = findPathAvoidingRestricted(currentPos, serviceLoc, restrictedPolygons);
+
+            if (pathBack.isEmpty()) {
+                throw new IllegalArgumentException(
+                    "No valid path found from delivery location back to service point"
+                );
+            }
+
+            flightPath.addAll(pathBack);
+            movesForThisDrone += Math.max(0, pathBack.size() - 1);  // Don't count the starting position
+
+            // Check max moves constraint
+            if (movesForThisDrone > drone.getCapability().getMaxMoves()) {
+                throw new IllegalArgumentException(
+                    "Drone " + drone.getId() + " exceeds max moves: " +
+                    movesForThisDrone + " > " + drone.getCapability().getMaxMoves()
+                );
+            }
+
+            // Create delivery path DTO
+            List<DeliveryPathDTO> deliveryPaths = batchDeliveries.stream()
+                .map(d -> new DeliveryPathDTO(d.getId(), flightPath))
+                .toList();
+
+            DronePathDTO dronePath = new DronePathDTO(drone.getId(), deliveryPaths);
+            dronePaths.add(dronePath);
+
+            // Calculate cost
+            costForThisDrone = drone.getCapability().getCostInitial() +
+                drone.getCapability().getCostFinal() +
+                movesForThisDrone * drone.getCapability().getCostPerMove();
+
+            totalMoves += movesForThisDrone;
+            totalCost += costForThisDrone;
+
+            System.out.println("   Moves: " + movesForThisDrone + ", Cost: " + costForThisDrone);
+        }
+
+        System.out.println("\n FAST PATH COMPLETE");
+        System.out.println("   Total Moves: " + totalMoves);
+        System.out.println("   Total Cost: " + totalCost);
+
+        return new CalcDeliveryPathResult(totalCost, totalMoves, dronePaths);
+    }
+
     //pick a pair of (drone, service point) that can handle this one dispatch as a whole flight(out,hover, back) without breaking constraints
     private  DroneAssignment pickDroneForDispatch(MedDispatchRec dispatchRec, List<Drone> drones, List<DronesForService> dfsList, List<ServicePoint> servicePoints, List<List<LngLat>> restrictedPolygons) {
 
+        // Get delivery location for distance calculations
+        LngLat deliveryLoc = dispatchRec.getDelivery();
+
+        System.out.println("");
+        System.out.println(" DRONE SELECTION - Delivery Location: (" + deliveryLoc.getLng() + ", " + deliveryLoc.getLat() + ")");
+        System.out.println("");
+
+        // Sort dfsList by distance from service point to delivery location (closest first)
+        // This ensures we prioritize the nearest service point
+        List<DronesForService> sortedDfsList = dfsList.stream()
+                .sorted((dfs1, dfs2) -> {
+                    ServicePoint sp1 = servicePoints.stream()
+                            .filter(s -> s.getId().equals(dfs1.getServicePointId()))
+                            .findFirst()
+                            .orElse(null);
+                    ServicePoint sp2 = servicePoints.stream()
+                            .filter(s -> s.getId().equals(dfs2.getServicePointId()))
+                            .findFirst()
+                            .orElse(null);
+
+                    if (sp1 == null) return 1;  // sp1 null -> sort it to end
+                    if (sp2 == null) return -1; // sp2 null -> sort it to end
+
+                    double dist1 = calculationService.calculateDistance(toLngLat(sp1.getLocation()), deliveryLoc);
+                    double dist2 = calculationService.calculateDistance(toLngLat(sp2.getLocation()), deliveryLoc);
+
+                    return Double.compare(dist1, dist2);
+                })
+                .toList();
+
+        // Log sorted service points with distances
+        System.out.println("\n Service Points sorted by distance:");
+        for (DronesForService dfs : sortedDfsList) {
+            ServicePoint sp = servicePoints.stream()
+                    .filter(s -> s.getId().equals(dfs.getServicePointId()))
+                    .findFirst()
+                    .orElse(null);
+            if (sp != null) {
+                double distance = calculationService.calculateDistance(toLngLat(sp.getLocation()), deliveryLoc);
+                System.out.printf("   • SP-%d (%s) at (%.4f, %.4f) - Distance: %.4f km | Drones: %d%n",
+                        sp.getId(), sp.getName(),
+                        sp.getLocation().getLng(), sp.getLocation().getLat(),
+                        distance, dfs.getDrones().size());
+            }
+        }
+
         //extracting service point Id from drones for service list, finding corresponding service Point
-        for (DronesForService dfs : dfsList) {
+        for (DronesForService dfs : sortedDfsList) {
             Integer spId = dfs.getServicePointId();
             ServicePoint sp = servicePoints.stream()
                     .filter(s->s.getId().equals(spId))
                     .findFirst()
                     .orElse(null);
             if (sp==null) continue;
+
+            System.out.println("\n Checking Service Point: " + sp.getName() + " (ID: " + sp.getId() + ")");
 
             //Iterating for drones at corresponding service point
             for(cw1.DTO.Internal.DroneAvailable da: dfs.getDrones()) {
@@ -618,10 +858,12 @@ public class DroneService {
                         .orElse(null);
                 if (drone == null) continue;
 
+                System.out.println("     Testing Drone: " + drone.getName() + " (ID: " + drone.getId() + ")");
 
                 //per-dispatch feasibility
                 //cheap non pathfinding check.
                 if(!canSingleDroneHandleDispatch(drone,dispatchRec,dfsList)) {
+                    System.out.println("       Failed: Capacity or availability check");
                     continue;
                 }
 
@@ -641,16 +883,25 @@ public class DroneService {
                         + 1                           // hover
                         + Math.max(0, back.size() - 1); // back
 
+                System.out.printf("       Moves: %d (out: %d, hover: 1, back: %d) | Max allowed: %d%n",
+                        moves, Math.max(0, out.size() - 1), Math.max(0, back.size() - 1),
+                        drone.getCapability().getMaxMoves());
+
                 //max moves constraint
                 //explicitly enforcing maxMoves for this particular (drone, servicePoint pair)
                 if(moves > drone.getCapability().getMaxMoves()) {
+                    System.out.println("       Failed: Exceeds max moves");
                     continue;
                 }
 
-
+                System.out.println("       SUCCESS! Selected drone: " + drone.getName() + " from " + sp.getName());
+                System.out.println("\n");
                 return new DroneAssignment(drone,sp);
             }
         }
+
+        System.out.println(" NO SUITABLE DRONE FOUND!");
+        System.out.println("\n");
         return null;
     }
 
@@ -659,18 +910,9 @@ public class DroneService {
         //get nested requirements from dispatchRec
         DispatchRec req = dispatchRec.getRequirements();
 
+        // Only check capacity constraint
         Double cap = req.getCapacity();
         if ( cap!= null && drone.getCapability().getCapacity() < cap) {
-            return false;
-        }
-
-        Boolean coolingRequired = req.getCooling();
-        if (Boolean.TRUE.equals(coolingRequired) && !Boolean.TRUE.equals(drone.getCapability().getCooling())) {
-            return false;
-        }
-
-        Boolean heatingRequired = req.getHeating();
-        if(Boolean.TRUE.equals(heatingRequired) && !Boolean.TRUE.equals(drone.getCapability().getHeating())) {
             return false;
         }
 

@@ -1,0 +1,150 @@
+# ============================================
+# Docker Compose for Weather-Aware Drone Delivery System
+# ============================================
+# Version: 3.0.0
+# Purpose: Orchestrate backend and optional monitoring services
+# ============================================
+
+version: '3.8'
+
+services:
+  # ============================================
+  # Backend Service
+  # ============================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: drone-delivery:3.0.0
+    container_name: drone-delivery-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Spring Boot Configuration
+      - SPRING_PROFILES_ACTIVE=production
+      - SERVER_PORT=8080
+
+      # External Service Endpoints
+      - ILP_ENDPOINT=https://ilp-rest-2025-bvh6e9hschfagrgy.ukwest-01.azurewebsites.net/
+      - WEATHER_API_ENDPOINT=https://api.openweathermap.org/
+
+      # Weather API Key (REQUIRED - Set this in .env file)
+      - WEATHER_API_KEY=${WEATHER_API_KEY}
+
+      # JVM Options (tune for production)
+      - JAVA_OPTS=-Xms512m -Xmx1024m -XX:+UseG1GC -XX:MaxGCPauseMillis=200
+
+      # Timezone
+      - TZ=UTC
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - drone-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # Nginx Reverse Proxy (Optional)
+  # ============================================
+  # Uncomment to add reverse proxy with SSL termination
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: drone-delivery-nginx
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./ssl:/etc/nginx/ssl:ro
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - drone-network
+
+  # ============================================
+  # Prometheus Monitoring (Optional)
+  # ============================================
+  # Uncomment to enable metrics collection
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: drone-delivery-prometheus
+  #   restart: unless-stopped
+  #   ports:
+  #     - "9090:9090"
+  #   volumes:
+  #     - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  #     - prometheus-data:/prometheus
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #   networks:
+  #     - drone-network
+
+  # ============================================
+  # Grafana Dashboard (Optional)
+  # ============================================
+  # Uncomment to enable visualization
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: drone-delivery-grafana
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3001:3000"
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+  #   volumes:
+  #     - grafana-data:/var/lib/grafana
+  #   depends_on:
+  #     - prometheus
+  #   networks:
+  #     - drone-network
+
+networks:
+  drone-network:
+    driver: bridge
+    name: drone-delivery-network
+
+volumes:
+  prometheus-data:
+    name: drone-delivery-prometheus
+  grafana-data:
+    name: drone-delivery-grafana
+
+# ============================================
+# Usage Instructions:
+# ============================================
+#
+# 1. Create .env file with your API key:
+#    echo "WEATHER_API_KEY=your_api_key_here" > .env
+#
+# 2. Start services:
+#    docker-compose up -d
+#
+# 3. View logs:
+#    docker-compose logs -f backend
+#
+# 4. Stop services:
+#    docker-compose down
+#
+# 5. Rebuild after code changes:
+#    docker-compose up -d --build
+#
+# 6. View service status:
+#    docker-compose ps
+#
+# 7. Access application:
+#    Backend API: http://localhost:8080
+#    Health Check: http://localhost:8080/actuator/health
+#    Prometheus (if enabled): http://localhost:9090
+#    Grafana (if enabled): http://localhost:3001
+#
+# ============================================

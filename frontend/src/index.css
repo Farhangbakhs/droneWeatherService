@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-retro-bg text-retro-text font-mono antialiased;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-retro-panel rounded-none border-4 border-retro-border p-6 shadow-retro;
+  }
+
+  .input {
+    @apply w-full px-4 py-2 bg-retro-bg border-2 border-retro-border rounded-none text-retro-text font-mono focus:outline-none focus:border-primary-500 transition-all;
+  }
+
+  .btn-primary {
+    @apply px-6 py-3 bg-primary-600 text-white font-mono font-bold rounded-none border-2 border-primary-800 hover:bg-primary-500 focus:outline-none shadow-retro transition-all disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-wider;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-3 bg-retro-border text-retro-text font-mono font-bold rounded-none border-2 border-retro-text hover:bg-slate-700 focus:outline-none shadow-retro transition-all uppercase tracking-wider;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-3 py-1 rounded-none text-xs font-mono font-bold border-2 uppercase tracking-wider;
+  }
+
+  .badge-success {
+    @apply badge bg-green-900 text-green-300 border-green-500;
+  }
+
+  .badge-warning {
+    @apply badge bg-yellow-900 text-yellow-300 border-yellow-500;
+  }
+
+  .badge-danger {
+    @apply badge bg-red-900 text-red-300 border-red-500;
+  }
+
+  .badge-info {
+    @apply badge bg-blue-900 text-blue-300 border-blue-500;
+  }
+
+  .pixel-icon {
+    @apply inline-block w-4 h-4 border border-current;
+  }
+}
+
+/* Leaflet map dark theme overrides */
+.leaflet-container {
+  font-family: 'JetBrains Mono', monospace !important;
+}
+
+.leaflet-popup-content-wrapper {
+  background: #1a1a2e !important;
+  color: #cccccc !important;
+  border: 2px solid #333366 !important;
+  border-radius: 0 !important;
+  box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 0.5) !important;
+}
+
+.leaflet-popup-tip {
+  background: #1a1a2e !important;
+  border: 2px solid #333366 !important;
+}

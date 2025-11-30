@@ -13,8 +13,8 @@
     </parent>
 
     <groupId>org.example</groupId>
-    <artifactId>Cw1</artifactId>
-    <version>1.0.0</version>
+    <artifactId>ilp_submission_3</artifactId>
+    <version>3.0.0</version>
     <packaging>jar</packaging>
 
     <properties>

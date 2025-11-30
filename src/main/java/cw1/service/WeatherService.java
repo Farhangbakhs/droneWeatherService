@@ -6,6 +6,7 @@ import cw1.DTO.External.ForecastResponse;
 import cw1.DTO.External.Precipitation;
 import cw1.DTO.Internal.*;
 import cw1.DTO.LngLat;
+import cw1.constants.WeatherConstants;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -24,17 +25,6 @@ import java.util.List;
  */
 @Service
 public class WeatherService {
-
-    // ==================== FLIGHT SAFETY THRESHOLDS ====================
-    // These values are configurable and based on typical drone limitations
-
-    private static final double MAX_SAFE_WIND_SPEED = 12.0;      // m/s (~43 km/h, ~27 mph)
-    private static final double MAX_SAFE_WIND_GUST = 15.0;       // m/s (~54 km/h, ~34 mph)
-    private static final int MIN_SAFE_VISIBILITY = 5000;         // meters (5 km)
-    private static final double MAX_SAFE_PRECIPITATION = 5.0;    // mm/h (light rain)
-    private static final double MIN_SAFE_TEMP = -10.0;           // Celsius (battery performance)
-    private static final double MAX_SAFE_TEMP = 45.0;            // Celsius (electronics)
-    private static final int DEFAULT_MIN_WINDOW_DURATION = 30;   // minutes
 
     private final WeatherRetrieveService weatherRetrieveService;
 
@@ -123,7 +113,7 @@ public class WeatherService {
         long startTime = request.getStartTime() != null ? request.getStartTime() : Instant.now().getEpochSecond();
         long endTime = request.getEndTime() != null ? request.getEndTime() : startTime + (5 * 24 * 60 * 60); // 5 days
         int minDuration = request.getMinWindowDurationMinutes() != null ?
-                request.getMinWindowDurationMinutes() : DEFAULT_MIN_WINDOW_DURATION;
+                request.getMinWindowDurationMinutes() : WeatherConstants.DEFAULT_MIN_WINDOW_DURATION_MINUTES;
 
         // Filter forecasts within time range
         List<WeatherSummary> relevantForecasts = forecasts.stream()
@@ -264,45 +254,45 @@ public class WeatherService {
 
         // Check 1: Wind
         boolean windSafe = true;
-        if (conditions.getWindSpeedMps() > MAX_SAFE_WIND_SPEED) {
+        if (conditions.getWindSpeedMps() > WeatherConstants.MAX_SAFE_WIND_SPEED) {
             windSafe = false;
             warnings.add(String.format("Wind speed %.1f m/s exceeds safe limit of %.1f m/s",
-                    conditions.getWindSpeedMps(), MAX_SAFE_WIND_SPEED));
+                    conditions.getWindSpeedMps(), WeatherConstants.MAX_SAFE_WIND_SPEED));
         }
-        if (conditions.getWindGustMps() != null && conditions.getWindGustMps() > MAX_SAFE_WIND_GUST) {
+        if (conditions.getWindGustMps() != null && conditions.getWindGustMps() > WeatherConstants.MAX_SAFE_WIND_GUST) {
             windSafe = false;
             warnings.add(String.format("Wind gusts %.1f m/s exceed safe limit of %.1f m/s",
-                    conditions.getWindGustMps(), MAX_SAFE_WIND_GUST));
+                    conditions.getWindGustMps(), WeatherConstants.MAX_SAFE_WIND_GUST));
         }
 
         // Check 2: Visibility
         boolean visibilitySafe = true;
-        if (conditions.getVisibility() != null && conditions.getVisibility() < MIN_SAFE_VISIBILITY) {
+        if (conditions.getVisibility() != null && conditions.getVisibility() < WeatherConstants.MIN_SAFE_VISIBILITY) {
             visibilitySafe = false;
             warnings.add(String.format("Visibility %d m below safe minimum of %d m",
-                    conditions.getVisibility(), MIN_SAFE_VISIBILITY));
+                    conditions.getVisibility(), WeatherConstants.MIN_SAFE_VISIBILITY));
         }
 
         // Check 3: Precipitation (convert 3h to hourly rate)
         boolean precipitationSafe = true;
         double precipitationRate = conditions.getPrecipitationMm() / 3.0;  // 3-hour → hourly
-        if (precipitationRate > MAX_SAFE_PRECIPITATION) {
+        if (precipitationRate > WeatherConstants.MAX_SAFE_PRECIPITATION) {
             precipitationSafe = false;
             warnings.add(String.format("Precipitation rate %.1f mm/h exceeds safe limit of %.1f mm/h",
-                    precipitationRate, MAX_SAFE_PRECIPITATION));
+                    precipitationRate, WeatherConstants.MAX_SAFE_PRECIPITATION));
         }
 
         // Check 4: Temperature
         boolean temperatureSafe = true;
-        if (conditions.getTemperatureCelsius() < MIN_SAFE_TEMP) {
+        if (conditions.getTemperatureCelsius() < WeatherConstants.MIN_SAFE_TEMP) {
             temperatureSafe = false;
             warnings.add(String.format("Temperature %.1f°C below safe minimum of %.1f°C",
-                    conditions.getTemperatureCelsius(), MIN_SAFE_TEMP));
+                    conditions.getTemperatureCelsius(), WeatherConstants.MIN_SAFE_TEMP));
         }
-        if (conditions.getTemperatureCelsius() > MAX_SAFE_TEMP) {
+        if (conditions.getTemperatureCelsius() > WeatherConstants.MAX_SAFE_TEMP) {
             temperatureSafe = false;
             warnings.add(String.format("Temperature %.1f°C above safe maximum of %.1f°C",
-                    conditions.getTemperatureCelsius(), MAX_SAFE_TEMP));
+                    conditions.getTemperatureCelsius(), WeatherConstants.MAX_SAFE_TEMP));
         }
 
         // Check 5: Severe weather conditions
@@ -313,7 +303,7 @@ public class WeatherService {
         } else if (condition.equals("Snow") && precipitationRate > 2.0) {
             warnings.add("Heavy snow detected - reduced visibility and flight control");
         } else if (condition.equals("Fog") || condition.equals("Mist")) {
-            if (conditions.getVisibility() != null && conditions.getVisibility() < MIN_SAFE_VISIBILITY) {
+            if (conditions.getVisibility() != null && conditions.getVisibility() < WeatherConstants.MIN_SAFE_VISIBILITY) {
                 warnings.add("Fog/Mist reducing visibility below safe limits");
             }
         }
@@ -323,11 +313,11 @@ public class WeatherService {
         metrics.setVisibilitySafe(visibilitySafe);
         metrics.setPrecipitationSafe(precipitationSafe);
         metrics.setTemperatureSafe(temperatureSafe);
-        metrics.setMaxSafeWindSpeed(MAX_SAFE_WIND_SPEED);
-        metrics.setMinSafeVisibility(MIN_SAFE_VISIBILITY);
-        metrics.setMaxSafePrecipitation(MAX_SAFE_PRECIPITATION);
-        metrics.setMinSafeTemp(MIN_SAFE_TEMP);
-        metrics.setMaxSafeTemp(MAX_SAFE_TEMP);
+        metrics.setMaxSafeWindSpeed(WeatherConstants.MAX_SAFE_WIND_SPEED);
+        metrics.setMinSafeVisibility(WeatherConstants.MIN_SAFE_VISIBILITY);
+        metrics.setMaxSafePrecipitation(WeatherConstants.MAX_SAFE_PRECIPITATION);
+        metrics.setMinSafeTemp(WeatherConstants.MIN_SAFE_TEMP);
+        metrics.setMaxSafeTemp(WeatherConstants.MAX_SAFE_TEMP);
 
         // Overall assessment
         boolean isSafe = windSafe && visibilitySafe && precipitationSafe && temperatureSafe;
@@ -351,9 +341,9 @@ public class WeatherService {
                                       boolean precipitationSafe, boolean temperatureSafe,
                                       int warningCount) {
         if (!windSafe || !visibilitySafe || !precipitationSafe || !temperatureSafe) {
-            if (warningCount >= 3) {
+            if (warningCount >= WeatherConstants.CRITICAL_RISK_WARNING_COUNT) {
                 return "CRITICAL";
-            } else if (warningCount >= 2) {
+            } else if (warningCount >= WeatherConstants.HIGH_RISK_WARNING_COUNT) {
                 return "HIGH";
             } else {
                 return "MEDIUM";
@@ -403,7 +393,7 @@ public class WeatherService {
         }
 
         long startTime = forecasts.get(0).getTimestamp();
-        long endTime = forecasts.get(forecasts.size() - 1).getTimestamp() + (3 * 60 * 60); // +3h
+        long endTime = forecasts.get(forecasts.size() - 1).getTimestamp() + WeatherConstants.FORECAST_INTERVAL_SECONDS;
         int durationMinutes = (int) ((endTime - startTime) / 60);
 
         // Check minimum duration
@@ -465,7 +455,7 @@ public class WeatherService {
         Integer windDirection = weather.getWindDirectionDeg();
 
         // If no wind data available, return neutral analysis
-        if (windDirection == null || windSpeed < 0.5) {
+        if (windDirection == null || windSpeed < WeatherConstants.MIN_WIND_SPEED_FOR_ANALYSIS) {
             return new WindImpactAnalysis(
                     deliveryPath.getTotalCost(),
                     deliveryPath.getTotalCost(),
@@ -480,43 +470,82 @@ public class WeatherService {
         double totalCostMultiplier = 0.0;
         int segmentCount = 0;
 
-        // Analyze each drone path
+        // Analyze each drone path (a delivery may involve multiple drones/dispatches)
         for (DronePathDTO dronePath : deliveryPath.getDronePaths()) {
             for (DeliveryPathDTO delivery : dronePath.getDeliveries()) {
                 List<LngLat> flightPath = delivery.getFlightPath();
+
+                // Skip invalid paths (need at least 2 points to form a segment)
                 if (flightPath == null || flightPath.size() < 2) {
                     continue;
                 }
 
                 // Analyze each segment in the flight path
+                // A segment is the straight-line movement from one waypoint to the next
                 for (int i = 0; i < flightPath.size() - 1; i++) {
                     LngLat start = flightPath.get(i);
                     LngLat end = flightPath.get(i + 1);
 
-                    // Calculate flight direction (bearing from start to end)
+                    // Step 1: Calculate flight direction (bearing from start to end)
+                    // Returns angle in degrees where 0° = North, 90° = East, etc.
                     double flightDirection = calculateBearing(start, end);
 
-                    // Calculate relative wind angle (difference between wind and flight direction)
+                    // Step 2: Calculate relative wind angle (difference between wind and flight direction)
+                    // Normalizes to 0-180° range (we only care about smallest angle, not which side)
                     double relativeWindAngle = calculateRelativeAngle(windDirection, flightDirection);
 
-                    // Determine wind impact type and cost multiplier
+                    // Step 3: Determine wind impact type and cost multiplier based on relative angle
+                    // - 0-45°: Headwind (flying into wind) → increased cost
+                    // - 135-180°: Tailwind (wind from behind) → decreased cost
+                    // - 45-135°: Crosswind (perpendicular wind) → slight cost increase (stability)
                     String impactType;
                     double costMultiplier;
 
-                    if (relativeWindAngle <= 45) {
+                    if (relativeWindAngle <= WeatherConstants.HEADWIND_ANGLE_THRESHOLD) {
                         // Headwind - flying into the wind
+                        // Scale impact based on wind speed: 0-30% penalty for 0-12 m/s winds
                         impactType = "HEADWIND";
-                        costMultiplier = 1.0 + (0.20 * (windSpeed / MAX_SAFE_WIND_SPEED));
-                    } else if (relativeWindAngle >= 135) {
+                        double headwindPenalty = Math.min(
+                            windSpeed * WeatherConstants.HEADWIND_PENALTY_PER_MS,
+                            WeatherConstants.MAX_HEADWIND_PENALTY
+                        );
+                        costMultiplier = 1.0 + headwindPenalty;
+
+                        if (i == 0) { // Log first segment details
+                            System.out.printf("  WIND ANALYSIS: WindSpeed=%.2f m/s, Penalty=%.2f%%, Multiplier=%.4f%n",
+                                    windSpeed, headwindPenalty * 100, costMultiplier);
+                        }
+                    } else if (relativeWindAngle >= WeatherConstants.TAILWIND_ANGLE_THRESHOLD) {
                         // Tailwind - wind pushing from behind
+                        // Scale benefit based on wind speed: 0-15% discount for 0-12 m/s winds
                         impactType = "TAILWIND";
-                        costMultiplier = 1.0 - (0.10 * (windSpeed / MAX_SAFE_WIND_SPEED));
+                        double tailwindBenefit = Math.min(
+                            windSpeed * WeatherConstants.TAILWIND_BENEFIT_PER_MS,
+                            WeatherConstants.MAX_TAILWIND_BENEFIT
+                        );
+                        costMultiplier = 1.0 - tailwindBenefit;
+
+                        if (i == 0) {
+                            System.out.printf("  WIND ANALYSIS: WindSpeed=%.2f m/s, Benefit=%.2f%%, Multiplier=%.4f%n",
+                                    windSpeed, tailwindBenefit * 100, costMultiplier);
+                        }
                     } else {
                         // Crosswind - wind from the side
+                        // Scale impact based on wind speed: 0-12% penalty for 0-12 m/s winds
                         impactType = "CROSSWIND";
-                        costMultiplier = 1.0 + (0.05 * (windSpeed / MAX_SAFE_WIND_SPEED));
+                        double crosswindPenalty = Math.min(
+                            windSpeed * WeatherConstants.CROSSWIND_PENALTY_PER_MS,
+                            WeatherConstants.MAX_CROSSWIND_PENALTY
+                        );
+                        costMultiplier = 1.0 + crosswindPenalty;
+
+                        if (i == 0) {
+                            System.out.printf("  WIND ANALYSIS: WindSpeed=%.2f m/s, Penalty=%.2f%%, Multiplier=%.4f%n",
+                                    windSpeed, crosswindPenalty * 100, costMultiplier);
+                        }
                     }
 
+                    // Store segment analysis for detailed reporting
                     segmentAnalysis.add(new WindImpactAnalysis.PathSegmentWind(
                             segmentCount,
                             flightDirection,
@@ -527,18 +556,27 @@ public class WeatherService {
                             costMultiplier
                     ));
 
+                    // Accumulate multipliers for averaging
                     totalCostMultiplier += costMultiplier;
                     segmentCount++;
                 }
             }
         }
 
-        // Calculate average cost multiplier across all segments
+        // Step 4: Calculate average cost multiplier across all segments
+        // This smooths out the impact across the entire path
+        // Example: If 5 segments have multipliers [1.1, 1.2, 0.9, 1.0, 1.15], avg = 1.07
         double avgCostMultiplier = segmentCount > 0 ? totalCostMultiplier / segmentCount : 1.0;
 
-        // Apply multiplier to total cost
+        // Step 5: Apply multiplier to total cost
+        // baseCost = number of moves (each move costs 1 unit)
+        // windAdjustedCost = baseCost × avgMultiplier (accounts for wind resistance/assistance)
         double baseCost = deliveryPath.getTotalCost();
         double windAdjustedCost = baseCost * avgCostMultiplier;
+
+        // Calculate percentage change for reporting
+        // Positive % = cost increase (headwind/crosswind dominant)
+        // Negative % = cost decrease (tailwind dominant)
         double costAdjustmentPercent = ((windAdjustedCost - baseCost) / baseCost) * 100;
 
         return new WindImpactAnalysis(
@@ -552,8 +590,29 @@ public class WeatherService {
     }
 
     /**
-     * Calculate bearing (direction) from one point to another
-     * Returns angle in degrees (0-360) where 0/360 is North
+     * Calculate bearing (direction) from one point to another using spherical geometry.
+     *
+     * <p><b>Formula:</b> Uses the atan2 function with adjusted coordinates:
+     * <pre>
+     * y = sin(Δlng) × cos(lat₂)
+     * x = cos(lat₁) × sin(lat₂) - sin(lat₁) × cos(lat₂) × cos(Δlng)
+     * bearing = atan2(y, x)
+     * </pre>
+     *
+     * <p><b>Bearing Convention:</b>
+     * <ul>
+     *   <li>0° / 360° = North</li>
+     *   <li>90° = East</li>
+     *   <li>180° = South</li>
+     *   <li>270° = West</li>
+     * </ul>
+     *
+     * <p><b>Note:</b> This uses the forward azimuth formula from spherical
+     * trigonometry, which is accurate for any distance on Earth.
+     *
+     * @param from Starting point
+     * @param to Ending point
+     * @return Bearing angle in degrees (0-360), where 0° is North
      */
     private double calculateBearing(LngLat from, LngLat to) {
         double lat1 = Math.toRadians(from.getLat());
@@ -567,21 +626,278 @@ public class WeatherService {
         double bearing = Math.toDegrees(Math.atan2(y, x));
 
         // Normalize to 0-360 range
-        return (bearing + 360) % 360;
+        return (bearing + WeatherConstants.FULL_CIRCLE_DEGREES) % WeatherConstants.FULL_CIRCLE_DEGREES;
     }
 
     /**
-     * Calculate relative angle between wind direction and flight direction
-     * Returns the smallest angle (0-180 degrees)
+     * Calculate relative angle between wind direction and flight direction.
+     *
+     * <p><b>Purpose:</b> Determines the angular difference to classify wind impact type
+     * (headwind, tailwind, or crosswind).
+     *
+     * <p><b>Algorithm:</b>
+     * <ol>
+     *   <li>Calculate absolute difference: |windDir - flightDir|</li>
+     *   <li>Normalize to 0-180° range (we only care about smallest angle, not direction)</li>
+     *   <li>If difference > 180°, use 360° - difference (shortest angular path)</li>
+     * </ol>
+     *
+     * <p><b>Examples:</b>
+     * <ul>
+     *   <li>Wind: 0°, Flight: 0° → Relative: 0° (headwind)</li>
+     *   <li>Wind: 0°, Flight: 180° → Relative: 180° (tailwind)</li>
+     *   <li>Wind: 350°, Flight: 10° → Relative: 20° (headwind, not 340°)</li>
+     * </ul>
+     *
+     * @param windDirection Wind direction in degrees (0-360)
+     * @param flightDirection Flight bearing in degrees (0-360)
+     * @return Smallest angular difference in degrees (0-180)
      */
     private double calculateRelativeAngle(double windDirection, double flightDirection) {
         double diff = Math.abs(windDirection - flightDirection);
 
         // Normalize to 0-180 range (we only care about relative angle, not which side)
-        if (diff > 180) {
-            diff = 360 - diff;
+        if (diff > WeatherConstants.HALF_CIRCLE_DEGREES) {
+            diff = WeatherConstants.FULL_CIRCLE_DEGREES - diff;
         }
 
         return diff;
+    }
+
+    // ==================== DATE/TIME BASED METHODS (CW3 EXTENSION) ====================
+
+    /**
+     * Convert LocalDate and LocalTime to epoch timestamp for forecast lookup
+     *
+     * @param date LocalDate for the delivery
+     * @param time LocalTime for the delivery
+     * @return Epoch timestamp in seconds
+     */
+    private long convertToTimestamp(java.time.LocalDate date, java.time.LocalTime time) {
+        if (date == null || time == null) {
+            return Instant.now().getEpochSecond();
+        }
+
+        // Combine date and time, assume UTC for weather API consistency
+        return date.atTime(time).toEpochSecond(ZoneOffset.UTC);
+    }
+
+    /**
+     * Check flight conditions at a specific date and time using forecast data
+     * This is the modular weather-aware extension - if date/time are null, falls back to current weather
+     *
+     * OpenWeatherMap forecast API covers ONLY the next 5 days. If date/time is outside this range,
+     * falls back to current weather.
+     *
+     * @param position Delivery location
+     * @param date Optional delivery date (if null, uses current weather)
+     * @param time Optional delivery time (if null, uses current weather)
+     * @return Flight safety assessment
+     */
+    public FlightConditionsResponse checkFlightConditionsAtDateTime(
+            LngLat position, java.time.LocalDate date, java.time.LocalTime time) {
+
+        if (date == null || time == null) {
+            // Fallback to current weather
+            FlightConditionsResponse response = checkFlightConditions(new FlightConditionsRequest(position, null));
+            response.setWeatherDataSource("Using current weather");
+            return response;
+        }
+
+        // Validate date range: OpenWeatherMap forecast API only covers next 5 days
+        java.time.LocalDateTime requestedDateTime = java.time.LocalDateTime.of(date, time);
+        java.time.LocalDateTime now = java.time.LocalDateTime.now(ZoneOffset.UTC);
+        java.time.LocalDateTime fiveDaysFromNow = now.plusDays(5);
+
+        // If requested time is in the past or more than 5 days in the future, use current weather
+        if (requestedDateTime.isBefore(now) || requestedDateTime.isAfter(fiveDaysFromNow)) {
+            // Outside forecast range - fallback to current weather
+            FlightConditionsResponse response = checkFlightConditions(new FlightConditionsRequest(position, null));
+            response.setWeatherDataSource("Not in forecast range, using current weather");
+            return response;
+        }
+
+        // Use forecast for specific date/time (within 5-day range)
+        long timestamp = convertToTimestamp(date, time);
+        FlightConditionsResponse response = checkFlightConditions(new FlightConditionsRequest(position, timestamp));
+        response.setWeatherDataSource("Using forecast data");
+        return response;
+    }
+
+    /**
+     * Analyze wind impact at a specific date and time using forecast data
+     * This is the modular weather-aware extension - if date/time are null, falls back to current weather
+     *
+     * OpenWeatherMap forecast API covers ONLY the next 5 days. If date/time is outside this range,
+     * falls back to current weather.
+     *
+     * @param deliveryPath The calculated delivery path
+     * @param position Delivery location
+     * @param date Optional delivery date (if null, uses current weather)
+     * @param time Optional delivery time (if null, uses current weather)
+     * @return Wind impact analysis with adjusted costs
+     */
+    public WindImpactAnalysis analyzeWindImpactAtDateTime(
+            CalcDeliveryPathResult deliveryPath, LngLat position,
+            java.time.LocalDate date, java.time.LocalTime time) {
+
+        WeatherSummary weather;
+
+        if (date == null || time == null) {
+            // Fallback to current weather
+            weather = getCurrentWeatherSummary(position);
+        } else {
+            // Validate date range: OpenWeatherMap forecast API only covers next 5 days
+            java.time.LocalDateTime requestedDateTime = java.time.LocalDateTime.of(date, time);
+            java.time.LocalDateTime now = java.time.LocalDateTime.now(ZoneOffset.UTC);
+            java.time.LocalDateTime fiveDaysFromNow = now.plusDays(5);
+
+            // If requested time is in the past or more than 5 days in the future, use current weather
+            if (requestedDateTime.isBefore(now) || requestedDateTime.isAfter(fiveDaysFromNow)) {
+                // Outside forecast range - fallback to current weather
+                weather = getCurrentWeatherSummary(position);
+            } else {
+                // Use forecast for specific date/time (within 5-day range)
+                long timestamp = convertToTimestamp(date, time);
+                weather = getForecastForTimestamp(position, timestamp);
+            }
+        }
+
+        double windSpeed = weather.getWindSpeedMps();
+        Integer windDirection = weather.getWindDirectionDeg();
+
+        // If no wind data available, return neutral analysis
+        if (windDirection == null || windSpeed < WeatherConstants.MIN_WIND_SPEED_FOR_ANALYSIS) {
+            return new WindImpactAnalysis(
+                    deliveryPath.getTotalCost(),
+                    deliveryPath.getTotalCost(),
+                    0.0,
+                    windSpeed,
+                    windDirection,
+                    List.of()
+            );
+        }
+
+        List<WindImpactAnalysis.PathSegmentWind> segmentAnalysis = new ArrayList<>();
+        double totalCostMultiplier = 0.0;
+        int segmentCount = 0;
+
+        // Analyze each drone path (a delivery may involve multiple drones/dispatches)
+        for (DronePathDTO dronePath : deliveryPath.getDronePaths()) {
+            for (DeliveryPathDTO delivery : dronePath.getDeliveries()) {
+                List<LngLat> flightPath = delivery.getFlightPath();
+
+                // Skip invalid paths (need at least 2 points to form a segment)
+                if (flightPath == null || flightPath.size() < 2) {
+                    continue;
+                }
+
+                // Analyze each segment in the flight path
+                // A segment is the straight-line movement from one waypoint to the next
+                for (int i = 0; i < flightPath.size() - 1; i++) {
+                    LngLat start = flightPath.get(i);
+                    LngLat end = flightPath.get(i + 1);
+
+                    // Step 1: Calculate flight direction (bearing from start to end)
+                    // Returns angle in degrees where 0° = North, 90° = East, etc.
+                    double flightDirection = calculateBearing(start, end);
+
+                    // Step 2: Calculate relative wind angle (difference between wind and flight direction)
+                    // Normalizes to 0-180° range (we only care about smallest angle, not which side)
+                    double relativeWindAngle = calculateRelativeAngle(windDirection, flightDirection);
+
+                    // Step 3: Determine wind impact type and cost multiplier based on relative angle
+                    // - 0-45°: Headwind (flying into wind) → increased cost
+                    // - 135-180°: Tailwind (wind from behind) → decreased cost
+                    // - 45-135°: Crosswind (perpendicular wind) → slight cost increase (stability)
+                    String impactType;
+                    double costMultiplier;
+
+                    if (relativeWindAngle <= WeatherConstants.HEADWIND_ANGLE_THRESHOLD) {
+                        // Headwind - flying into the wind
+                        // Scale impact based on wind speed: 0-30% penalty for 0-12 m/s winds
+                        impactType = "HEADWIND";
+                        double headwindPenalty = Math.min(
+                            windSpeed * WeatherConstants.HEADWIND_PENALTY_PER_MS,
+                            WeatherConstants.MAX_HEADWIND_PENALTY
+                        );
+                        costMultiplier = 1.0 + headwindPenalty;
+
+                        if (i == 0) { // Log first segment details
+                            System.out.printf("  WIND ANALYSIS: WindSpeed=%.2f m/s, Penalty=%.2f%%, Multiplier=%.4f%n",
+                                    windSpeed, headwindPenalty * 100, costMultiplier);
+                        }
+                    } else if (relativeWindAngle >= WeatherConstants.TAILWIND_ANGLE_THRESHOLD) {
+                        // Tailwind - wind pushing from behind
+                        // Scale benefit based on wind speed: 0-15% discount for 0-12 m/s winds
+                        impactType = "TAILWIND";
+                        double tailwindBenefit = Math.min(
+                            windSpeed * WeatherConstants.TAILWIND_BENEFIT_PER_MS,
+                            WeatherConstants.MAX_TAILWIND_BENEFIT
+                        );
+                        costMultiplier = 1.0 - tailwindBenefit;
+
+                        if (i == 0) {
+                            System.out.printf("  WIND ANALYSIS: WindSpeed=%.2f m/s, Benefit=%.2f%%, Multiplier=%.4f%n",
+                                    windSpeed, tailwindBenefit * 100, costMultiplier);
+                        }
+                    } else {
+                        // Crosswind - wind from the side
+                        // Scale impact based on wind speed: 0-12% penalty for 0-12 m/s winds
+                        impactType = "CROSSWIND";
+                        double crosswindPenalty = Math.min(
+                            windSpeed * WeatherConstants.CROSSWIND_PENALTY_PER_MS,
+                            WeatherConstants.MAX_CROSSWIND_PENALTY
+                        );
+                        costMultiplier = 1.0 + crosswindPenalty;
+
+                        if (i == 0) {
+                            System.out.printf("  WIND ANALYSIS: WindSpeed=%.2f m/s, Penalty=%.2f%%, Multiplier=%.4f%n",
+                                    windSpeed, crosswindPenalty * 100, costMultiplier);
+                        }
+                    }
+
+                    // Store segment analysis for detailed reporting
+                    segmentAnalysis.add(new WindImpactAnalysis.PathSegmentWind(
+                            segmentCount,
+                            flightDirection,
+                            windDirection.doubleValue(),
+                            windSpeed,
+                            impactType,
+                            relativeWindAngle,
+                            costMultiplier
+                    ));
+
+                    // Accumulate multipliers for averaging
+                    totalCostMultiplier += costMultiplier;
+                    segmentCount++;
+                }
+            }
+        }
+
+        // Step 4: Calculate average cost multiplier across all segments
+        // This smooths out the impact across the entire path
+        // Example: If 5 segments have multipliers [1.1, 1.2, 0.9, 1.0, 1.15], avg = 1.07
+        double avgCostMultiplier = segmentCount > 0 ? totalCostMultiplier / segmentCount : 1.0;
+
+        // Step 5: Apply multiplier to total cost
+        // baseCost = number of moves (each move costs 1 unit)
+        // windAdjustedCost = baseCost × avgMultiplier (accounts for wind resistance/assistance)
+        double baseCost = deliveryPath.getTotalCost();
+        double windAdjustedCost = baseCost * avgCostMultiplier;
+
+        // Calculate percentage change for reporting
+        // Positive % = cost increase (headwind/crosswind dominant)
+        // Negative % = cost decrease (tailwind dominant)
+        double costAdjustmentPercent = ((windAdjustedCost - baseCost) / baseCost) * 100;
+
+        return new WindImpactAnalysis(
+                baseCost,
+                windAdjustedCost,
+                costAdjustmentPercent,
+                windSpeed,
+                windDirection,
+                segmentAnalysis
+        );
     }
 }

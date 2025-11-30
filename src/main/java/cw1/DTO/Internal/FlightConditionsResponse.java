@@ -18,6 +18,7 @@ public class FlightConditionsResponse {
     private List<String> warnings;       // Specific warnings (human-readable)
     private WeatherSummary currentConditions;
     private FlightSafetyMetrics metrics;
+    private String weatherDataSource;    // "Using forecast data" or "Not in forecast range, using current weather"
 
     /**
      * Detailed metrics for each safety criterion
